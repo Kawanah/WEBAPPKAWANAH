@@ -161,20 +161,24 @@ create index if not exists order_status_history_changed_at_idx on order_status_h
 create or replace function orders_recalculate_total()
 returns trigger as $$
 declare
+    target_order uuid := coalesce(new.order_id, old.order_id);
     total numeric(10,2);
 begin
-    select coalesce(sum((oi.unit_price + coalesce(sum(oio.price_delta),0)) * oi.quantity), 0)
+    select coalesce(sum((oi.unit_price + coalesce((select sum(oio.price_delta) from order_item_options oio where oio.order_item_id = oi.id), 0)) * oi.quantity), 0)
       into total
       from order_items oi
-      left join order_item_options oio on oio.order_item_id = oi.id
-     where oi.order_id = new.order_id;
+     where oi.order_id = target_order;
 
     update orders
        set total_amount = total,
            updated_at = now()
-     where id = new.order_id;
+     where id = target_order;
 
-    return new;
+    if tg_op = 'DELETE' then
+      return old;
+    else
+      return new;
+    end if;
 end;
 $$ language plpgsql;
 
